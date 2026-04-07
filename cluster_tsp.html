@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 TSP до 1000 городов | Кластеризованная линия</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            background: #0a0f1e;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            color: #ccddff;
+        }
+        .container { max-width: 1300px; margin: 0 auto; }
+        h1 { color: #ffaa44; }
+        .note { font-size: 12px; color: #88aaff; margin-bottom: 20px; }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: #0e1a2a;
+            border-radius: 16px;
+            padding: 12px;
+            border: 1px solid #ffaa5544;
+            text-align: center;
+        }
+        .card .value { font-size: 1.8rem; font-weight: bold; color: #ffdd99; }
+        .card .label { font-size: 0.7rem; color: #88aaff; }
+        
+        .control-panel {
+            background: #0a1220;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .control-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+        .control-row label { min-width: 180px; }
+        input[type="range"] { flex: 1; min-width: 200px; accent-color: #ffaa44; }
+        input[type="number"] { background: #1a2a3a; border: 1px solid #ffaa5544; color: #ffdd99; padding: 5px 10px; border-radius: 8px; width: 100px; }
+        button {
+            background: #1e2f46;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 40px;
+            font-weight: bold;
+            color: #ffddbb;
+            cursor: pointer;
+            font-family: monospace;
+            transition: 0.2s;
+        }
+        button:hover { background: #ffaa44; color: #0a0f1e; transform: scale(0.97); }
+        .test-buttons { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px; }
+        .test-btn { background: #2a3a5a; padding: 8px 16px; font-size: 13px; }
+        .test-btn:hover { background: #ffaa44; }
+        
+        .results {
+            background: #0a1220;
+            border-radius: 16px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .result-line {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            border-bottom: 1px solid #2a3a5a;
+            font-family: monospace;
+        }
+        .result-line .label { color: #88aaff; }
+        .result-line .value { color: #ffdd99; font-weight: bold; }
+        .highlight { color: #88ff88; }
+        
+        pre {
+            background: #03070f;
+            padding: 12px;
+            border-radius: 12px;
+            overflow-x: auto;
+            font-size: 11px;
+            margin-top: 15px;
+            max-height: 250px;
+        }
+        
+        .progress-bg { width: 100%; height: 6px; background: #2a3a55; margin-top: 10px; border-radius: 4px; overflow: hidden; }
+        .progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #ffaa44, #ff6600); transition: width 0.1s; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📊 TSP на кластеризованной линии | До 1000 городов</h1>
+    <div class="note">🎯 При шуме=0 точность должна быть 100%. Для больших кластеров используется жадный алгоритм (nearest neighbor).</div>
+    
+    <div class="grid">
+        <div class="card"><div class="value" id="totalCities">0</div><div class="label">🏙️ Городов</div></div>
+        <div class="card"><div class="value" id="totalClusters">0</div><div class="label">📦 Кластеров</div></div>
+        <div class="card"><div class="value" id="totalTime">0</div><div class="label">⏱️ Время (мс)</div></div>
+        <div class="card"><div class="value" id="accuracyVal">0%</div><div class="label">🎯 Точность</div></div>
+    </div>
+    
+    <div class="control-panel">
+        <div class="control-row">
+            <label>📊 Кластеров: <span id="clustersCountVal">20</span></label>
+            <input type="range" id="clustersCount" min="2" max="50" step="1" value="20">
+        </div>
+        <div class="control-row">
+            <label>🏙️ Городов на кластер: <span id="pointsPerClusterVal">10</span></label>
+            <input type="range" id="pointsPerCluster" min="2" max="30" step="1" value="10">
+        </div>
+        <div class="control-row">
+            <label>🎲 Шум позиции: <span id="noiseVal">0</span></label>
+            <input type="range" id="noise" min="0" max="0.5" step="0.01" value="0">
+        </div>
+        <div class="control-row">
+            <label>🔄 Сид: <input type="number" id="seed" value="42" step="1"></label>
+            <button id="runBtn">🚀 ЗАПУСТИТЬ</button>
+            <button id="randomBtn">🎲 СЛУЧАЙНЫЙ СИД</button>
+        </div>
+        <div class="test-buttons">
+            <button class="test-btn" data-clusters="10" data-points="10">🏙️ 100 городов</button>
+            <button class="test-btn" data-clusters="20" data-points="10">🏙️ 200 городов</button>
+            <button class="test-btn" data-clusters="25" data-points="20">🏙️ 500 городов</button>
+            <button class="test-btn" data-clusters="33" data-points="30">🏙️ 990 городов</button>
+            <button class="test-btn" data-clusters="40" data-points="25">🏙️ 1000 городов</button>
+        </div>
+        <div class="progress-bg"><div class="progress-fill" id="progFill"></div></div>
+    </div>
+    
+    <div class="results" id="results">
+        <div class="result-line"><span class="label">📊 Статус:</span><span class="value" id="status">Ожидание</span></div>
+        <div class="result-line"><span class="label">📏 Длина маршрута:</span><span class="value" id="totalDist">—</span></div>
+        <div class="result-line"><span class="label">🎯 Эталон:</span><span class="value" id="baselineDist">—</span></div>
+        <div class="result-line"><span class="label">📈 Отклонение:</span><span class="value" id="deviation">—</span></div>
+    </div>
+    
+    <pre id="log"></pre>
+</div>
+
+<script>
+    // ========== ГЕНЕРАТОР ==========
+    let seed = 42;
+    function rng() {
+        seed = (seed * 1664525 + 1013904223) % 4294967296;
+        return seed / 4294967296;
+    }
+    
+    function setSeed(newSeed) { seed = newSeed; }
+    
+    // ========== ТОЧКА ==========
+    class Point {
+        constructor(x, y) { this.x = x; this.y = y; }
+        distTo(other) { return Math.hypot(this.x - other.x, this.y - other.y); }
+    }
+    
+    // ========== ЖАДНЫЙ TSP ДЛЯ БОЛЬШИХ КЛАСТЕРОВ ==========
+    function greedyTSP(points) {
+        if (points.length <= 1) return { route: points, dist: 0 };
+        if (points.length <= 8) return exactTSP(points);
+        
+        const n = points.length;
+        const visited = new Array(n).fill(false);
+        const route = [0];
+        visited[0] = true;
+        let totalDist = 0;
+        
+        for (let step = 1; step < n; step++) {
+            let last = route[route.length - 1];
+            let bestIdx = -1;
+            let bestDist = Infinity;
+            for (let i = 0; i < n; i++) {
+                if (!visited[i]) {
+                    const d = points[last].distTo(points[i]);
+                    if (d < bestDist) {
+                        bestDist = d;
+                        bestIdx = i;
+                    }
+                }
+            }
+            route.push(bestIdx);
+            visited[bestIdx] = true;
+            totalDist += bestDist;
+        }
+        totalDist += points[route[route.length - 1]].distTo(points[route[0]]);
+        
+        const routePoints = route.map(i => points[i]);
+        return { route: routePoints, dist: totalDist };
+    }
+    
+    // ========== ТОЧНЫЙ TSP ДЛЯ МАЛЕНЬКИХ КЛАСТЕРОВ ==========
+    function exactTSP(points) {
+        const n = points.length;
+        if (n === 0) return { route: [], dist: 0 };
+        if (n === 1) return { route: [points[0]], dist: 0 };
+        
+        let bestRoute = null;
+        let bestDist = Infinity;
+        const indices = Array.from({length: n}, (_, i) => i);
+        
+        const permute = (arr, start) => {
+            if (start === arr.length - 1) {
+                let dist = 0;
+                for (let i = 0; i < arr.length - 1; i++) {
+                    dist += points[arr[i]].distTo(points[arr[i + 1]]);
+                }
+                dist += points[arr[arr.length - 1]].distTo(points[arr[0]]);
+                if (dist < bestDist) { bestDist = dist; bestRoute = [...arr]; }
+                return;
+            }
+            for (let i = start; i < arr.length; i++) {
+                [arr[start], arr[i]] = [arr[i], arr[start]];
+                permute(arr, start + 1);
+                [arr[start], arr[i]] = [arr[i], arr[start]];
+            }
+        };
+        
+        permute([...indices], 0);
+        return { route: bestRoute.map(i => points[i]), dist: bestDist };
+    }
+    
+    // ========== КЛАСТЕР ==========
+    class Cluster {
+        constructor(basePos, points, noise) {
+            this.basePos = basePos;
+            this.points = points;
+            this.noise = noise;
+        }
+        
+        getPosition() {
+            if (this.noise === 0) return this.basePos;
+            return this.basePos + (rng() - 0.5) * 2 * this.noise;
+        }
+        
+        solveTSP() {
+            // Для больших кластеров используем жадный алгоритм
+            return greedyTSP(this.points);
+        }
+    }
+    
+    // ========== TSP НА ЛИНИИ ==========
+    function solveTSPOnLine(clusters) {
+        const noisy = clusters.map(c => ({ cluster: c, pos: c.getPosition() }));
+        noisy.sort((a, b) => a.pos - b.pos);
+        
+        let route = [], totalDist = 0, lastPoint = null;
+        
+        for (const nc of noisy) {
+            const { route: r, dist } = nc.cluster.solveTSP();
+            if (lastPoint && r.length) totalDist += lastPoint.distTo(r[0]);
+            totalDist += dist;
+            route.push(...r);
+            if (r.length) lastPoint = r[r.length - 1];
+        }
+        if (route.length > 1) totalDist += route[route.length - 1].distTo(route[0]);
+        
+        return { route, dist: totalDist };
+    }
+    
+    // ========== ЭТАЛОН ==========
+    function computeBaseline(clusters) {
+        const sorted = [...clusters].sort((a, b) => a.basePos - b.basePos);
+        let totalDist = 0, lastPoint = null;
+        
+        for (const c of sorted) {
+            const { route, dist } = c.solveTSP();
+            if (lastPoint && route.length) totalDist += lastPoint.distTo(route[0]);
+            totalDist += dist;
+            if (route.length) lastPoint = route[route.length - 1];
+        }
+        if (sorted.length && sorted[0].points.length && lastPoint) {
+            const firstRoute = sorted[0].solveTSP().route;
+            if (firstRoute.length) totalDist += lastPoint.distTo(firstRoute[0]);
+        }
+        return totalDist;
+    }
+    
+    // ========== ГЕНЕРАЦИЯ ДАННЫХ ==========
+    function generateData(clustersCount, pointsPerCluster, noise) {
+        const clusters = [];
+        for (let i = 0; i < clustersCount; i++) {
+            const basePos = i + 1;
+            const points = [];
+            const centerX = basePos * 10;
+            const centerY = (i % 2 === 0 ? 0 : 10);
+            for (let j = 0; j < pointsPerCluster; j++) {
+                const x = centerX + (rng() - 0.5) * 8;
+                const y = centerY + (rng() - 0.5) * 8;
+                points.push(new Point(x, y));
+            }
+            clusters.push(new Cluster(basePos, points, noise));
+        }
+        return clusters;
+    }
+    
+    // ========== UI ==========
+    const clustersSlider = document.getElementById('clustersCount');
+    const pointsSlider = document.getElementById('pointsPerCluster');
+    const noiseSlider = document.getElementById('noise');
+    const seedInput = document.getElementById('seed');
+    const runBtn = document.getElementById('runBtn');
+    const randomBtn = document.getElementById('randomBtn');
+    const progFill = document.getElementById('progFill');
+    
+    function updateUI() {
+        document.getElementById('clustersCountVal').innerText = clustersSlider.value;
+        document.getElementById('pointsPerClusterVal').innerText = pointsSlider.value;
+        document.getElementById('noiseVal').innerText = parseFloat(noiseSlider.value).toFixed(3);
+    }
+    
+    async function runTest() {
+        const clustersCount = parseInt(clustersSlider.value);
+        const pointsPerCluster = parseInt(pointsSlider.value);
+        const noise = parseFloat(noiseSlider.value);
+        const newSeed = parseInt(seedInput.value);
+        
+        setSeed(newSeed);
+        updateUI();
+        
+        const totalCities = clustersCount * pointsPerCluster;
+        document.getElementById('totalCities').innerText = totalCities;
+        document.getElementById('totalClusters').innerText = clustersCount;
+        document.getElementById('status').innerHTML = '🔄 Генерация...';
+        progFill.style.width = '10%';
+        
+        await new Promise(r => setTimeout(r, 10));
+        
+        const clusters = generateData(clustersCount, pointsPerCluster, noise);
+        progFill.style.width = '40%';
+        document.getElementById('status').innerHTML = '🔄 Решение TSP...';
+        
+        await new Promise(r => setTimeout(r, 10));
+        
+        const start = performance.now();
+        const result = solveTSPOnLine(clusters);
+        const end = performance.now();
+        const baseline = computeBaseline(clusters);
+        const accuracy = (baseline / result.dist * 100);
+        const deviation = ((result.dist - baseline) / baseline * 100);
+        
+        progFill.style.width = '100%';
+        document.getElementById('totalTime').innerHTML = (end - start).toFixed(2);
+        document.getElementById('totalDist').innerHTML = result.dist.toFixed(2);
+        document.getElementById('baselineDist').innerHTML = baseline.toFixed(2);
+        document.getElementById('accuracyVal').innerHTML = `${accuracy.toFixed(2)}%`;
+        document.getElementById('deviation').innerHTML = `${deviation.toFixed(2)}%`;
+        document.getElementById('status').innerHTML = '✅ Готово';
+        
+        const logDiv = document.getElementById('log');
+        logDiv.innerHTML = `
+┌────────────────────────────────────────────────────────────────┐
+│ 📊 TSP НА КЛАСТЕРИЗОВАННОЙ ЛИНИИ                               │
+├────────────────────────────────────────────────────────────────┤
+│ 🏙️ Городов:          ${totalCities}
+│ 📦 Кластеров:         ${clustersCount}
+│ 📏 Точек на кластер:  ${pointsPerCluster}
+│ 🎲 Шум:               ${noise}
+│ 🔢 Сид:               ${newSeed}
+├────────────────────────────────────────────────────────────────┤
+│ 📏 Длина маршрута:    ${result.dist.toFixed(2)}
+│ 🎯 Эталон:            ${baseline.toFixed(2)}
+│ 📈 Точность:          ${accuracy.toFixed(2)}% ${accuracy >= 99.9 ? '🔥' : (accuracy >= 95 ? '✅' : '⚠️')}
+│ 📉 Отклонение:        ${deviation.toFixed(2)}%
+│ ⏱️ Время:             ${(end - start).toFixed(2)} мс
+└────────────────────────────────────────────────────────────────┘
+        `;
+    }
+    
+    function randomSeed() {
+        seedInput.value = Math.floor(Math.random() * 10000);
+        runTest();
+    }
+    
+    function presetTest(clusters, points) {
+        clustersSlider.value = clusters;
+        pointsSlider.value = points;
+        runTest();
+    }
+    
+    clustersSlider.addEventListener('input', updateUI);
+    pointsSlider.addEventListener('input', updateUI);
+    noiseSlider.addEventListener('input', updateUI);
+    runBtn.addEventListener('click', runTest);
+    randomBtn.addEventListener('click', randomSeed);
+    
+    document.querySelectorAll('.test-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const clusters = parseInt(btn.dataset.clusters);
+            const points = parseInt(btn.dataset.points);
+            presetTest(clusters, points);
+        });
+    });
+    
+    updateUI();
+    runTest();
+</script>
+</body>
+</html>

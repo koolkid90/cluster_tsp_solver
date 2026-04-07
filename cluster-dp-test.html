@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 TSP up to 1000 cities | Optimized Cluster Line</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            background: #0a0f1e;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            color: #ccddff;
+        }
+        .container { max-width: 1300px; margin: 0 auto; }
+        h1 { color: #ffaa44; }
+        .note { font-size: 12px; color: #88aaff; margin-bottom: 20px; }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: #0e1a2a;
+            border-radius: 16px;
+            padding: 12px;
+            border: 1px solid #ffaa5544;
+            text-align: center;
+        }
+        .card .value { font-size: 1.8rem; font-weight: bold; color: #ffdd99; }
+        .card .label { font-size: 0.7rem; color: #88aaff; }
+        
+        .control-panel {
+            background: #0a1220;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .control-row {
+            display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px; align-items: center;
+        }
+        .control-row label { min-width: 180px; }
+        input[type="range"] { flex: 1; min-width: 200px; accent-color: #ffaa44; }
+        input[type="number"] { background: #1a2a3a; border: 1px solid #ffaa5544; color: #ffdd99; padding: 5px 10px; border-radius: 8px; width: 100px; }
+        button {
+            background: #1e2f46; border: none; padding: 10px 24px; border-radius: 40px;
+            font-weight: bold; color: #ffddbb; cursor: pointer; font-family: monospace; transition: 0.2s;
+        }
+        button:hover { background: #ffaa44; color: #0a0f1e; transform: scale(0.97); }
+        .test-buttons { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px; }
+        .test-btn { background: #2a3a5a; padding: 8px 16px; font-size: 13px; }
+        .test-btn:hover { background: #ffaa44; }
+        
+        .results {
+            background: #0a1220; border-radius: 16px; padding: 20px; margin-top: 20px;
+        }
+        .result-line {
+            display: flex; justify-content: space-between; padding: 8px;
+            border-bottom: 1px solid #2a3a5a; font-family: monospace;
+        }
+        .result-line .label { color: #88aaff; }
+        .result-line .value { color: #ffdd99; font-weight: bold; }
+        .highlight { color: #88ff88; }
+        .warn { color: #ffaa44; }
+        
+        pre {
+            background: #03070f; padding: 12px; border-radius: 12px; overflow-x: auto;
+            font-size: 11px; margin-top: 15px; max-height: 250px;
+        }
+        
+        .progress-bg { width: 100%; height: 6px; background: #2a3a55; margin-top: 10px; border-radius: 4px; overflow: hidden; }
+        .progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #ffaa44, #ff6600); transition: width 0.1s; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📊 TSP on a Clustered Line | Up to 1000 cities</h1>
+    <div class="note">🎯 Optimization: open path inside cluster + DP direction selection. Independent baseline (Held-Karp / Multi-Start NN).</div>
+    
+    <div class="grid">
+        <div class="card"><div class="value" id="totalCities">0</div><div class="label">🏙️ Cities</div></div>
+        <div class="card"><div class="value" id="totalClusters">0</div><div class="label">📦 Clusters</div></div>
+        <div class="card"><div class="value" id="totalTime">0</div><div class="label">⏱️ Time (ms)</div></div>
+        <div class="card"><div class="value" id="accuracyVal">0%</div><div class="label">🎯 Accuracy</div></div>
+    </div>
+    
+    <div class="control-panel">
+        <div class="control-row">
+            <label>📊 Clusters: <span id="clustersCountVal">20</span></label>
+            <input type="range" id="clustersCount" min="2" max="50" step="1" value="20">
+        </div>
+        <div class="control-row">
+            <label>🏙️ Cities per cluster: <span id="pointsPerClusterVal">10</span></label>
+            <input type="range" id="pointsPerCluster" min="2" max="30" step="1" value="10">
+        </div>
+        <div class="control-row">
+            <label>🎲 Position noise: <span id="noiseVal">0</span></label>
+            <input type="range" id="noise" min="0" max="0.5" step="0.01" value="0">
+        </div>
+        <div class="control-row">
+            <label>🔄 Seed: <input type="number" id="seed" value="42" step="1"></label>
+            <button id="runBtn">🚀 RUN</button>
+            <button id="randomBtn">🎲 RANDOM SEED</button>
+        </div>
+        <div class="test-buttons">
+            <button class="test-btn" data-clusters="10" data-points="10">🏙️ 100 cities</button>
+            <button class="test-btn" data-clusters="20" data-points="10">🏙️ 200 cities</button>
+            <button class="test-btn" data-clusters="25" data-points="20">🏙️ 500 cities</button>
+            <button class="test-btn" data-clusters="33" data-points="30">🏙️ 990 cities</button>
+            <button class="test-btn" data-clusters="40" data-points="25">🏙️ 1000 cities</button>
+        </div>
+        <div class="progress-bg"><div class="progress-fill" id="progFill"></div></div>
+    </div>
+    
+    <div class="results" id="results">
+        <div class="result-line"><span class="label">📊 Status:</span><span class="value" id="status">Waiting</span></div>
+        <div class="result-line"><span class="label">📏 Route length:</span><span class="value" id="totalDist">—</span></div>
+        <div class="result-line"><span class="label">🎯 Independent baseline:</span><span class="value" id="baselineDist">—</span></div>
+        <div class="result-line"><span class="label">📈 Deviation:</span><span class="value" id="deviation">—</span></div>
+    </div>
+    
+    <pre id="log"></pre>
+</div>
+
+<script>
+    // ========== RNG ==========
+    let seed = 42;
+    function rng() {
+        seed = (seed * 1664525 + 1013904223) % 4294967296;
+        return seed / 4294967296;
+    }
+    function setSeed(newSeed) { seed = newSeed; }
+    
+    // ========== POINT ==========
+    class Point {
+        constructor(x, y) { this.x = x; this.y = y; }
+        distTo(other) { return Math.hypot(this.x - other.x, this.y - other.y); }
+    }
+    
+    // ========== OPEN PATH TSP (OPTIMIZED) ==========
+    function solveOpenPathTSP(points) {
+        const n = points.length;
+        if (n <= 1) return { route: points.slice(), dist: 0, start: points[0], end: points[0] };
+        if (n === 2) return { route: points.slice(), dist: points[0].distTo(points[1]), start: points[0], end: points[1] };
+        
+        let bestDist = Infinity, bestRoute = null;
+        
+        if (n <= 8) {
+            // Exact brute force for open path
+            const indices = Array.from({length: n}, (_, i) => i);
+            const permute = (arr, start) => {
+                if (start === arr.length - 1) {
+                    let dist = 0;
+                    for (let i = 0; i < arr.length - 1; i++) {
+                        dist += points[arr[i]].distTo(points[arr[i + 1]]);
+                    }
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestRoute = arr.slice();
+                    }
+                    return;
+                }
+                for (let i = start; i < arr.length; i++) {
+                    [arr[start], arr[i]] = [arr[i], arr[start]];
+                    permute(arr, start + 1);
+                    [arr[start], arr[i]] = [arr[i], arr[start]];
+                }
+            };
+            permute([...indices], 0);
+        } else {
+            // Greedy open path: try all starting points
+            for (let s = 0; s < n; s++) {
+                const visited = new Uint8Array(n);
+                const route = [s];
+                visited[s] = 1;
+                let dist = 0, curr = s;
+                
+                for (let step = 1; step < n; step++) {
+                    let next = -1, minD = Infinity;
+                    for (let j = 0; j < n; j++) {
+                        if (!visited[j]) {
+                            const d = points[curr].distTo(points[j]);
+                            if (d < minD) { minD = d; next = j; }
+                        }
+                    }
+                    route.push(next); dist += minD; visited[next] = 1; curr = next;
+                }
+                if (dist < bestDist) { bestDist = dist; bestRoute = route; }
+            }
+        }
+        
+        const finalRoute = bestRoute.map(i => points[i]);
+        return { 
+            route: finalRoute, 
+            dist: bestDist, 
+            start: finalRoute[0], 
+            end: finalRoute[finalRoute.length - 1] 
+        };
+    }
+    
+    // ========== CLUSTER ==========
+    class Cluster {
+        constructor(basePos, points, noise) {
+            this.basePos = basePos;
+            this.points = points;
+            this.noise = noise;
+            this.internalPath = solveOpenPathTSP(points);
+        }
+        getPosition() {
+            if (this.noise === 0) return this.basePos;
+            return this.basePos + (rng() - 0.5) * 2 * this.noise;
+        }
+    }
+    
+    // ========== DP OPTIMIZATION FOR CLUSTER CONNECTIONS ==========
+    function solveClusteredTSP(clusters) {
+        // Sort by position
+        const noisy = clusters.map(c => ({ cluster: c, pos: c.getPosition() }));
+        noisy.sort((a, b) => a.pos - b.pos);
+        const sortedClusters = noisy.map(x => x.cluster);
+        const m = sortedClusters.length;
+        if (m === 0) return { route: [], dist: 0 };
+        if (m === 1) return { route: sortedClusters[0].internalPath.route, dist: sortedClusters[0].internalPath.dist };
+        
+        // dp[i][0] = min cost to reach cluster i, exiting through internalPath.start
+        // dp[i][1] = min cost to reach cluster i, exiting through internalPath.end
+        const dp = Array.from({length: m}, () => [Infinity, Infinity]);
+        const parent = Array.from({length: m}, () => [-1, -1]);
+        
+        // Initialize first cluster
+        dp[0][0] = sortedClusters[0].internalPath.dist;
+        dp[0][1] = sortedClusters[0].internalPath.dist;
+        
+        for (let i = 1; i < m; i++) {
+            const prev = sortedClusters[i-1].internalPath;
+            const curr = sortedClusters[i].internalPath;
+            
+            // Transition options:
+            // prev.start (dir 0) -> curr.start (dir 0)
+            const d00 = prev.start.distTo(curr.start);
+            if (dp[i-1][0] + d00 + curr.dist < dp[i][0]) {
+                dp[i][0] = dp[i-1][0] + d00 + curr.dist;
+                parent[i][0] = { fromDir: 0, prevExit: 'start' };
+            }
+            
+            // prev.end (dir 1) -> curr.start (dir 0)
+            const d10 = prev.end.distTo(curr.start);
+            if (dp[i-1][1] + d10 + curr.dist < dp[i][0]) {
+                dp[i][0] = dp[i-1][1] + d10 + curr.dist;
+                parent[i][0] = { fromDir: 1, prevExit: 'end' };
+            }
+            
+            // prev.start (dir 0) -> curr.end (dir 1)
+            const d01 = prev.start.distTo(curr.end);
+            if (dp[i-1][0] + d01 + curr.dist < dp[i][1]) {
+                dp[i][1] = dp[i-1][0] + d01 + curr.dist;
+                parent[i][1] = { fromDir: 0, prevExit: 'start' };
+            }
+            
+            // prev.end (dir 1) -> curr.end (dir 1)
+            const d11 = prev.end.distTo(curr.end);
+            if (dp[i-1][1] + d11 + curr.dist < dp[i][1]) {
+                dp[i][1] = dp[i-1][1] + d11 + curr.dist;
+                parent[i][1] = { fromDir: 1, prevExit: 'end' };
+            }
+        }
+        
+        // Return to start: add cost from last exit to first entry
+        const firstPath = sortedClusters[0].internalPath;
+        const lastPath = sortedClusters[m-1].internalPath;
+        
+        let bestTotal = Infinity, lastDir = -1;
+        for (let dir = 0; dir < 2; dir++) {
+            const exitPoint = dir === 0 ? lastPath.start : lastPath.end;
+            const entryPoint = dir === 0 ? firstPath.end : firstPath.start;
+            const returnDist = exitPoint.distTo(entryPoint);
+            const total = dp[m-1][dir] + returnDist;
+            if (total < bestTotal) { bestTotal = total; lastDir = dir; }
+        }
+        
+        // Reconstruct route
+        const route = [];
+        let currDir = lastDir;
+        for (let i = m - 1; i >= 0; i--) {
+            const c = sortedClusters[i].internalPath;
+            if (currDir === 0) route.push(...c.route);
+            else route.push(...[...c.route].reverse());
+            
+            if (i > 0) {
+                const p = parent[i][currDir];
+                currDir = p.fromDir;
+            }
+        }
+        
+        return { route, dist: bestTotal };
+    }
+    
+    // ========== INDEPENDENT BASELINE ==========
+    function heldKarpTSP(points) {
+        const n = points.length;
+        if (n <= 1) return { dist: 0, route: points.slice() };
+        
+        const numMasks = 1 << n;
+        const dp = new Array(numMasks).fill(null).map(() => new Float64Array(n).fill(Infinity));
+        const parent = new Array(numMasks).fill(null).map(() => new Int32Array(n).fill(-1));
+        
+        dp[1][0] = 0;
+        for (let mask = 1; mask < numMasks; mask++) {
+            for (let u = 0; u < n; u++) {
+                if ((mask & (1 << u)) && dp[mask][u] < Infinity) {
+                    for (let v = 0; v < n; v++) {
+                        if (!(mask & (1 << v))) {
+                            const newMask = mask | (1 << v);
+                            const newDist = dp[mask][u] + points[u].distTo(points[v]);
+                            if (newDist < dp[newMask][v]) {
+                                dp[newMask][v] = newDist;
+                                parent[newMask][v] = u;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        let bestDist = Infinity, bestEnd = -1;
+        const fullMask = numMasks - 1;
+        for (let i = 1; i < n; i++) {
+            const total = dp[fullMask][i] + points[i].distTo(points[0]);
+            if (total < bestDist) { bestDist = total; bestEnd = i; }
+        }
+        
+        const route = [];
+        let curr = bestEnd, mask = fullMask;
+        for (let i = 0; i < n - 1; i++) {
+            route.unshift(curr);
+            const prev = parent[mask][curr];
+            mask ^= (1 << curr);
+            curr = prev;
+        }
+        route.unshift(0);
+        return { dist: bestDist, route: route.map(i => points[i]) };
+    }
+    
+    function multiStartNNTSP(points, starts = 40) {
+        const n = points.length;
+        let bestDist = Infinity, bestRoute = null;
+        for (let s = 0; s < starts; s++) {
+            const startIdx = s < n ? s : Math.floor(rng() * n);
+            const visited = new Uint8Array(n);
+            const route = [startIdx];
+            visited[startIdx] = 1;
+            let dist = 0, curr = startIdx;
+            
+            for (let step = 1; step < n; step++) {
+                let next = -1, minD = Infinity;
+                for (let j = 0; j < n; j++) {
+                    if (!visited[j]) {
+                        const d = points[curr].distTo(points[j]);
+                        if (d < minD) { minD = d; next = j; }
+                    }
+                }
+                route.push(next); dist += minD; visited[next] = 1; curr = next;
+            }
+            dist += points[curr].distTo(points[startIdx]);
+            if (dist < bestDist) { bestDist = dist; bestRoute = route.map(i => points[i]); }
+        }
+        return { dist: bestDist, route: bestRoute };
+    }
+    
+    function computeIndependentBaseline(points) {
+        if (points.length <= 16) return heldKarpTSP(points);
+        return multiStartNNTSP(points, 40);
+    }
+    
+    // ========== DATA GENERATION ==========
+    function generateData(clustersCount, pointsPerCluster, noise) {
+        const clusters = [];
+        for (let i = 0; i < clustersCount; i++) {
+            const basePos = i + 1;
+            const points = [];
+            const centerX = basePos * 10;
+            const centerY = (i % 2 === 0 ? 0 : 10);
+            for (let j = 0; j < pointsPerCluster; j++) {
+                const x = centerX + (rng() - 0.5) * 8;
+                const y = centerY + (rng() - 0.5) * 8;
+                points.push(new Point(x, y));
+            }
+            clusters.push(new Cluster(basePos, points, noise));
+        }
+        return clusters;
+    }
+    
+    // ========== UI ==========
+    const clustersSlider = document.getElementById('clustersCount');
+    const pointsSlider = document.getElementById('pointsPerCluster');
+    const noiseSlider = document.getElementById('noise');
+    const seedInput = document.getElementById('seed');
+    const runBtn = document.getElementById('runBtn');
+    const randomBtn = document.getElementById('randomBtn');
+    const progFill = document.getElementById('progFill');
+    
+    function updateUI() {
+        document.getElementById('clustersCountVal').innerText = clustersSlider.value;
+        document.getElementById('pointsPerClusterVal').innerText = pointsSlider.value;
+        document.getElementById('noiseVal').innerText = parseFloat(noiseSlider.value).toFixed(3);
+    }
+    
+    async function runTest() {
+        const clustersCount = parseInt(clustersSlider.value);
+        const pointsPerCluster = parseInt(pointsSlider.value);
+        const noise = parseFloat(noiseSlider.value);
+        const newSeed = parseInt(seedInput.value);
+        
+        setSeed(newSeed);
+        updateUI();
+        
+        const totalCities = clustersCount * pointsPerCluster;
+        document.getElementById('totalCities').innerText = totalCities;
+        document.getElementById('totalClusters').innerText = clustersCount;
+        document.getElementById('status').innerHTML = '🔄 Generating...';
+        progFill.style.width = '10%';
+        
+        await new Promise(r => setTimeout(r, 10));
+        
+        const clusters = generateData(clustersCount, pointsPerCluster, noise);
+        progFill.style.width = '40%';
+        document.getElementById('status').innerHTML = '🔄 Optimized solution...';
+        
+        await new Promise(r => setTimeout(r, 10));
+        
+        const start = performance.now();
+        const result = solveClusteredTSP(clusters);
+        const end = performance.now();
+        
+        progFill.style.width = '70%';
+        document.getElementById('status').innerHTML = '📊 Computing independent baseline...';
+        await new Promise(r => setTimeout(r, 10));
+        
+        const allPoints = clusters.flatMap(c => c.points);
+        const baseline = computeIndependentBaseline(allPoints);
+        const accuracy = Math.min(100, (baseline.dist / result.dist * 100));
+        const deviation = ((result.dist - baseline.dist) / baseline.dist * 100);
+        
+        progFill.style.width = '100%';
+        document.getElementById('totalTime').innerHTML = (end - start).toFixed(2);
+        document.getElementById('totalDist').innerHTML = result.dist.toFixed(2);
+        document.getElementById('baselineDist').innerHTML = baseline.dist.toFixed(2);
+        document.getElementById('accuracyVal').innerHTML = `${accuracy.toFixed(2)}%`;
+        document.getElementById('deviation').innerHTML = `${deviation.toFixed(2)}%`;
+        document.getElementById('status').innerHTML = '✅ Done';
+        
+        const methodUsed = totalCities <= 16 ? 'Held-Karp (exact)' : 'Multi-Start NN (40 runs)';
+        const logDiv = document.getElementById('log');
+        logDiv.innerHTML = `
+┌────────────────────────────────────────────────────────────────┐
+│ 📊 TSP ON CLUSTERED LINE                                       │
+├────────────────────────────────────────────────────────────────┤
+│ 🏙️ Cities:            ${totalCities}
+│ 📦 Clusters:          ${clustersCount}
+│ 📏 Points per cluster: ${pointsPerCluster}
+│ 🎲 Noise:             ${noise}
+│ 🔢 Seed:              ${newSeed}
+├────────────────────────────────────────────────────────────────┤
+│ 📏 Route length:      ${result.dist.toFixed(2)}
+│ 🎯 Independent baseline: ${baseline.dist.toFixed(2)} (${methodUsed})
+│ 📈 Accuracy:          ${accuracy.toFixed(2)}% ${accuracy >= 95 ? '🔥' : (accuracy >= 85 ? '✅' : '⚠️')}
+│ 📉 Deviation:         ${deviation.toFixed(2)}%
+│ ⏱️ Main time:         ${(end - start).toFixed(2)} ms
+└────────────────────────────────────────────────────────────────┘
+💡 Optimization: open path + DP direction selection for cluster traversal
+        `;
+    }
+    
+    function randomSeed() {
+        seedInput.value = Math.floor(Math.random() * 10000);
+        runTest();
+    }
+    
+    function presetTest(clusters, points) {
+        clustersSlider.value = clusters;
+        pointsSlider.value = points;
+        runTest();
+    }
+    
+    clustersSlider.addEventListener('input', updateUI);
+    pointsSlider.addEventListener('input', updateUI);
+    noiseSlider.addEventListener('input', updateUI);
+    runBtn.addEventListener('click', runTest);
+    randomBtn.addEventListener('click', randomSeed);
+    
+    document.querySelectorAll('.test-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const clusters = parseInt(btn.dataset.clusters);
+            const points = parseInt(btn.dataset.points);
+            presetTest(clusters, points);
+        });
+    });
+    
+    updateUI();
+    runTest();
+</script>
+</body>
+</html>

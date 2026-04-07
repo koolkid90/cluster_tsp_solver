@@ -27,7 +27,7 @@ JitterTSP – P (linear), 1ms for 1000 cities
 
 The catch? This only works when the data has cluster-line structure. But many real-world problems do – and JitterTSP learns to detect it.
 
-Create with AI-he;p
+Create with AI-help
 
 Author: Pavel Bobkin
 Github: koolkid90

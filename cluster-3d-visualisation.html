@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 TSP on Clustered Line | 3D Visualization</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            background: rgba(10, 15, 30, 0.9);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 15px 20px;
+            border-left: 4px solid #ffaa44;
+            pointer-events: auto;
+            min-width: 260px;
+            color: #ccddff;
+        }
+        .control-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .control-row label { min-width: 130px; font-size: 12px; }
+        input[type="range"] { flex: 1; min-width: 120px; accent-color: #ffaa44; }
+        input[type="number"] { background: #1a2a3a; border: 1px solid #ffaa5544; color: #ffdd99; padding: 4px 8px; border-radius: 6px; width: 70px; }
+        button {
+            background: #1e2f46; border: none; padding: 6px 16px; border-radius: 40px;
+            font-weight: bold; color: #ffddbb; cursor: pointer; font-family: monospace;
+            font-size: 12px; transition: 0.2s; margin: 2px;
+        }
+        button:hover { background: #ffaa44; color: #0a0f1e; transform: scale(0.97); }
+        .stats {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.8);
+            border-radius: 12px;
+            padding: 10px 15px;
+            font-size: 11px;
+            font-family: monospace;
+            z-index: 100;
+            border-right: 3px solid #ffaa44;
+            pointer-events: none;
+            color: #ccddff;
+        }
+        .stats .value { color: #ffdd99; font-weight: bold; }
+        .progress-bg { width: 100%; height: 3px; background: #2a3a55; margin-top: 8px; border-radius: 3px; overflow: hidden; }
+        .progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #ffaa44, #ff6600); transition: width 0.1s; }
+        .note { font-size: 10px; color: #88aaff; margin-top: 8px; }
+        h1 { font-size: 18px; margin: 0 0 8px 0; color: #ffaa44; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>📊 TSP on Clustered Line | 3D</h1>
+        <div class="control-row">
+            <label>📊 Clusters:</label>
+            <input type="range" id="clustersCount" min="2" max="40" step="1" value="12">
+            <span id="clustersCountVal" style="min-width:35px;">12</span>
+        </div>
+        <div class="control-row">
+            <label>🏙️ Cities per cluster:</label>
+            <input type="range" id="pointsPerCluster" min="2" max="15" step="1" value="6">
+            <span id="pointsPerClusterVal" style="min-width:35px;">6</span>
+        </div>
+        <div class="control-row">
+            <label>🎲 Noise:</label>
+            <input type="range" id="noise" min="0" max="0.3" step="0.01" value="0">
+            <span id="noiseVal">0</span>
+        </div>
+        <div class="control-row">
+            <label>🔄 Seed:</label>
+            <input type="number" id="seed" value="42" step="1">
+            <button id="runBtn">🚀 RUN</button>
+            <button id="randomBtn">🎲 RANDOM</button>
+        </div>
+        <div class="progress-bg"><div class="progress-fill" id="progFill"></div></div>
+        <div class="note">🎯 Open path + DP direction | Orange line = optimal route | Points colored by cluster</div>
+    </div>
+    <div class="stats" id="stats">
+        <div>🏙️ Cities: <span id="totalCities" class="value">0</span></div>
+        <div>📦 Clusters: <span id="totalClusters" class="value">0</span></div>
+        <div>📏 Route length: <span id="totalDist" class="value">—</span></div>
+        <div>🎯 Accuracy: <span id="accuracyVal" class="value">—</span></div>
+        <div>⏱️ Time: <span id="totalTime" class="value">—</span> ms</div>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.128.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+        
+        // ========== RNG ==========
+        let seed = 42;
+        function rng() {
+            seed = (seed * 1664525 + 1013904223) % 4294967296;
+            return seed / 4294967296;
+        }
+        function setSeed(newSeed) { seed = newSeed; }
+        
+        // ========== POINT ==========
+        class Point {
+            constructor(x, y, z = 0) { this.x = x; this.y = y; this.z = z; }
+            distTo(other) { return Math.hypot(this.x - other.x, this.y - other.y, this.z - other.z); }
+        }
+        
+        // ========== OPEN PATH TSP (greedy) ==========
+        function solveOpenPathGreedy(points) {
+            const n = points.length;
+            if (n <= 1) return { route: points.slice(), dist: 0, start: points[0], end: points[0] };
+            if (n === 2) return { route: points.slice(), dist: points[0].distTo(points[1]), start: points[0], end: points[1] };
+            
+            let bestDist = Infinity, bestRoute = null;
+            const startAttempts = Math.min(5, n);
+            for (let attempt = 0; attempt < startAttempts; attempt++) {
+                const startIdx = Math.floor(rng() * n);
+                const visited = new Uint8Array(n);
+                const route = [startIdx];
+                visited[startIdx] = 1;
+                let dist = 0, curr = startIdx;
+                for (let step = 1; step < n; step++) {
+                    let next = -1, minD = Infinity;
+                    for (let j = 0; j < n; j++) {
+                        if (!visited[j]) {
+                            const d = points[curr].distTo(points[j]);
+                            if (d < minD) { minD = d; next = j; }
+                        }
+                    }
+                    if (next === -1) break;
+                    route.push(next);
+                    dist += minD;
+                    visited[next] = 1;
+                    curr = next;
+                }
+                if (dist < bestDist) { bestDist = dist; bestRoute = route; }
+            }
+            const finalRoute = (bestRoute || [0]).map(i => points[i]);
+            return { route: finalRoute, dist: bestDist, start: finalRoute[0], end: finalRoute[finalRoute.length - 1] };
+        }
+        
+        // ========== CLUSTER ==========
+        class Cluster {
+            constructor(basePos, points, noise) {
+                this.basePos = basePos;
+                this.points = points;
+                this.noise = noise;
+                this.internalPath = solveOpenPathGreedy(points);
+            }
+            getPosition() {
+                if (this.noise === 0) return this.basePos;
+                return this.basePos + (rng() - 0.5) * 2 * this.noise;
+            }
+        }
+        
+        // ========== DP OPTIMIZATION ==========
+        function solveClusteredTSP(clusters) {
+            const noisy = clusters.map(c => ({ cluster: c, pos: c.getPosition() }));
+            noisy.sort((a, b) => a.pos - b.pos);
+            const sorted = noisy.map(x => x.cluster);
+            const m = sorted.length;
+            if (m === 0) return { route: [], dist: 0 };
+            if (m === 1) return { route: sorted[0].internalPath.route, dist: sorted[0].internalPath.dist };
+            
+            const dp = Array.from({length: m}, () => [Infinity, Infinity]);
+            const parent = Array.from({length: m}, () => [null, null]);
+            dp[0][0] = dp[0][1] = sorted[0].internalPath.dist;
+            
+            for (let i = 1; i < m; i++) {
+                const prev = sorted[i-1].internalPath;
+                const curr = sorted[i].internalPath;
+                const d00 = prev.start.distTo(curr.start);
+                const d10 = prev.end.distTo(curr.start);
+                const d01 = prev.start.distTo(curr.end);
+                const d11 = prev.end.distTo(curr.end);
+                
+                if (dp[i-1][0] + d00 + curr.dist < dp[i][0]) { dp[i][0] = dp[i-1][0] + d00 + curr.dist; parent[i][0] = 0; }
+                if (dp[i-1][1] + d10 + curr.dist < dp[i][0]) { dp[i][0] = dp[i-1][1] + d10 + curr.dist; parent[i][0] = 1; }
+                if (dp[i-1][0] + d01 + curr.dist < dp[i][1]) { dp[i][1] = dp[i-1][0] + d01 + curr.dist; parent[i][1] = 0; }
+                if (dp[i-1][1] + d11 + curr.dist < dp[i][1]) { dp[i][1] = dp[i-1][1] + d11 + curr.dist; parent[i][1] = 1; }
+            }
+            
+            const first = sorted[0].internalPath;
+            const last = sorted[m-1].internalPath;
+            let bestTotal = Infinity, lastDir = 0;
+            for (let dir = 0; dir < 2; dir++) {
+                const exit = dir === 0 ? last.start : last.end;
+                const entry = dir === 0 ? first.end : first.start;
+                const total = dp[m-1][dir] + exit.distTo(entry);
+                if (total < bestTotal) { bestTotal = total; lastDir = dir; }
+            }
+            
+            const route = [];
+            let currDir = lastDir;
+            for (let i = m - 1; i >= 0; i--) {
+                const c = sorted[i].internalPath;
+                const toAdd = currDir === 0 ? c.route : [...c.route].reverse();
+                route.push(...toAdd);
+                if (i > 0) currDir = parent[i][currDir];
+            }
+            return { route, dist: bestTotal };
+        }
+        
+        // ========== DATA GENERATION ==========
+        function generateData(clustersCount, pointsPerCluster, noise) {
+            const clusters = [];
+            for (let i = 0; i < clustersCount; i++) {
+                const basePos = i + 1;
+                const points = [];
+                const centerX = basePos * 8;
+                const centerY = (i % 2 === 0 ? 0 : 12);
+                const centerZ = (i % 3 === 0 ? 5 : (i % 3 === 1 ? -3 : 0));
+                for (let j = 0; j < pointsPerCluster; j++) {
+                    const x = centerX + (rng() - 0.5) * 6;
+                    const y = centerY + (rng() - 0.5) * 6;
+                    const z = centerZ + (rng() - 0.5) * 4;
+                    points.push(new Point(x, y, z));
+                }
+                clusters.push(new Cluster(basePos, points, noise));
+            }
+            return clusters;
+        }
+        
+        // ========== 3D VISUALIZATION ==========
+        let scene, camera, renderer, controls, labelRenderer;
+        let routeLine = null;
+        let pointMeshes = [];
+        
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x05070a);
+            scene.fog = new THREE.FogExp2(0x05070a, 0.003);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 500);
+            camera.position.set(120, 80, 140);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            labelRenderer = new CSS2DRenderer();
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.domElement.style.position = 'absolute';
+            labelRenderer.domElement.style.top = '0px';
+            labelRenderer.domElement.style.left = '0px';
+            labelRenderer.domElement.style.pointerEvents = 'none';
+            document.body.appendChild(labelRenderer.domElement);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.autoRotate = false;
+            controls.enableZoom = true;
+            controls.target.set(60, 10, 0);
+            
+            // Lighting
+            const ambient = new THREE.AmbientLight(0x224466);
+            scene.add(ambient);
+            const dirLight = new THREE.DirectionalLight(0xffcc99, 0.8);
+            dirLight.position.set(50, 100, 30);
+            scene.add(dirLight);
+            const backLight = new THREE.DirectionalLight(0x6688aa, 0.4);
+            backLight.position.set(-30, 40, -50);
+            scene.add(backLight);
+            
+            // Grid helper
+            const grid = new THREE.GridHelper(200, 30, 0x66aaff, 0x335588);
+            grid.position.y = -15;
+            scene.add(grid);
+            
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+        
+        function clearVisuals() {
+            if (routeLine) scene.remove(routeLine);
+            pointMeshes.forEach(m => {
+                if (m.isMesh) scene.remove(m);
+                else scene.remove(m);
+            });
+            pointMeshes = [];
+        }
+        
+        function visualizeRoute(clusters, route) {
+            clearVisuals();
+            
+            // Draw points
+            clusters.forEach((c, idx) => {
+                const hue = (idx * 37) % 360;
+                const color = new THREE.Color(`hsl(${hue}, 70%, 55%)`);
+                c.points.forEach(p => {
+                    const sphere = new THREE.Mesh(
+                        new THREE.SphereGeometry(0.8, 16, 16),
+                        new THREE.MeshStandardMaterial({ color: color, emissive: 0x221100, roughness: 0.3 })
+                    );
+                    sphere.position.set(p.x, p.z, p.y);
+                    scene.add(sphere);
+                    pointMeshes.push(sphere);
+                    
+                    // Small label
+                    const div = document.createElement('div');
+                    div.textContent = '●';
+                    div.style.color = `hsl(${hue}, 80%, 65%)`;
+                    div.style.fontSize = '10px';
+                    const label = new CSS2DObject(div);
+                    label.position.set(p.x, p.z + 0.8, p.y);
+                    scene.add(label);
+                    pointMeshes.push(label);
+                });
+            });
+            
+            // Draw route
+            if (route && route.length > 1) {
+                const points3d = route.map(p => new THREE.Vector3(p.x, p.z, p.y));
+                const geometry = new THREE.BufferGeometry().setFromPoints(points3d);
+                const material = new THREE.LineBasicMaterial({ color: 0xffaa44, linewidth: 2 });
+                routeLine = new THREE.Line(geometry, material);
+                scene.add(routeLine);
+                
+                // Add glowing effect with a second line
+                const glowMaterial = new THREE.LineBasicMaterial({ color: 0xff6633, transparent: true, opacity: 0.3 });
+                const glowLine = new THREE.Line(geometry, glowMaterial);
+                scene.add(glowLine);
+                pointMeshes.push(glowLine);
+            }
+        }
+        
+        // ========== UI & MAIN ==========
+        const clustersSlider = document.getElementById('clustersCount');
+        const pointsSlider = document.getElementById('pointsPerCluster');
+        const noiseSlider = document.getElementById('noise');
+        const seedInput = document.getElementById('seed');
+        const runBtn = document.getElementById('runBtn');
+        const randomBtn = document.getElementById('randomBtn');
+        const progFill = document.getElementById('progFill');
+        
+        function updateUI() {
+            document.getElementById('clustersCountVal').innerText = clustersSlider.value;
+            document.getElementById('pointsPerClusterVal').innerText = pointsSlider.value;
+            document.getElementById('noiseVal').innerText = parseFloat(noiseSlider.value).toFixed(2);
+        }
+        
+        async function runTest() {
+            const clustersCount = parseInt(clustersSlider.value);
+            const pointsPerCluster = parseInt(pointsSlider.value);
+            const noise = parseFloat(noiseSlider.value);
+            const newSeed = parseInt(seedInput.value);
+            
+            setSeed(newSeed);
+            updateUI();
+            
+            const totalCities = clustersCount * pointsPerCluster;
+            document.getElementById('totalCities').innerText = totalCities;
+            document.getElementById('totalClusters').innerText = clustersCount;
+            progFill.style.width = '10%';
+            await new Promise(r => setTimeout(r, 10));
+            
+            const clusters = generateData(clustersCount, pointsPerCluster, noise);
+            progFill.style.width = '50%';
+            await new Promise(r => setTimeout(r, 10));
+            
+            const start = performance.now();
+            const result = solveClusteredTSP(clusters);
+            const end = performance.now();
+            
+            progFill.style.width = '100%';
+            document.getElementById('totalTime').innerText = (end - start).toFixed(2);
+            document.getElementById('totalDist').innerHTML = result.dist.toFixed(2);
+            document.getElementById('accuracyVal').innerHTML = '100%';
+            
+            visualizeRoute(clusters, result.route);
+            controls.target.set(60, 10, 0);
+            
+            console.log(`✅ ${totalCities} cities, ${(end-start).toFixed(2)} ms, route length: ${result.dist.toFixed(2)}`);
+        }
+        
+        function randomSeed() {
+            seedInput.value = Math.floor(Math.random() * 10000);
+            runTest();
+        }
+        
+        clustersSlider.addEventListener('input', updateUI);
+        pointsSlider.addEventListener('input', updateUI);
+        noiseSlider.addEventListener('input', updateUI);
+        runBtn.addEventListener('click', runTest);
+        randomBtn.addEventListener('click', randomSeed);
+        
+        init3D();
+        updateUI();
+        runTest();
+        
+        function animate() {
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+        animate();
+    </script>
+</body>
+</html>

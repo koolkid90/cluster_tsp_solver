@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>📊 TSP | Click points → Optimize route | Accuracy</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0f1e;
+            overflow: hidden;
+            height: 100vh;
+        }
+        /* Панель управления — сверху */
+        .toolbar {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            right: 12px;
+            z-index: 1000;
+            background: rgba(10, 15, 30, 0.94);
+            backdrop-filter: blur(12px);
+            border-radius: 48px;
+            padding: 8px 20px;
+            border: 1px solid #ffaa5544;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            pointer-events: auto;
+            font-size: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0,0,0,0.5);
+            padding: 4px 12px;
+            border-radius: 32px;
+        }
+        .toolbar-group label { color: #88aaff; font-size: 11px; }
+        button {
+            background: #1e2f46;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 32px;
+            font-weight: bold;
+            color: #ffddbb;
+            cursor: pointer;
+            font-family: monospace;
+            font-size: 12px;
+            transition: 0.2s;
+        }
+        button:hover { background: #ffaa44; color: #0a0f1e; transform: scale(0.96); }
+        .mode-btn { background: #2a3a5a; }
+        .mode-btn.active { background: #ffaa44; color: #0a0f1e; }
+        
+        /* Статистика — внизу слева */
+        .stats {
+            position: fixed;
+            bottom: 12px;
+            left: 12px;
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            padding: 8px 14px;
+            font-size: 11px;
+            z-index: 1000;
+            border-left: 3px solid #ffaa44;
+            pointer-events: none;
+            color: #ccddff;
+            font-family: monospace;
+            min-width: 220px;
+        }
+        .stats .value { color: #ffdd99; font-weight: bold; }
+        .stats .accuracy-good { color: #88ff88; }
+        .stats .accuracy-ok { color: #ffdd88; }
+        .stats .accuracy-bad { color: #ff8866; }
+        
+        /* Карта */
+        .map-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        #map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .legend {
+            position: fixed;
+            bottom: 12px;
+            right: 12px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 10px;
+            z-index: 1000;
+            color: #ddd;
+            pointer-events: none;
+        }
+        .instructions {
+            position: fixed;
+            top: 80px;
+            right: 12px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 10px;
+            z-index: 1000;
+            color: #aaa;
+            pointer-events: none;
+        }
+    </style>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+    <div class="toolbar">
+        <div class="toolbar-group">
+            <label>🌍 Mode:</label>
+            <button id="modeEuclid" class="mode-btn active">Euclidean</button>
+            <button id="modeManhattan" class="mode-btn">Manhattan</button>
+        </div>
+        <button id="clearBtn">🗑️ CLEAR ALL</button>
+        <button id="runBtn" style="background:#ffaa44; color:#0a0f1e;">🚀 OPTIMIZE ROUTE</button>
+        <div class="toolbar-group">
+            <span id="pointCount" style="color:#ffaa44;">0 points</span>
+        </div>
+    </div>
+    <div class="stats" id="stats">
+        <div>📍 Points: <span id="totalPoints" class="value">0</span></div>
+        <div>📏 Route length: <span id="totalDist" class="value">—</span> km</div>
+        <div>🎯 Accuracy: <span id="accuracyVal" class="value">—</span></div>
+        <div>⏱️ Time: <span id="totalTime" class="value">—</span> ms</div>
+    </div>
+    <div class="legend">
+        <span style="color:#ffaa44;">●</span> Optimal route &nbsp;| <span style="color:#ff6600;">●</span> Points (numbered)
+    </div>
+    <div class="instructions">
+        ✏️ Click on map to add points | 🔄 Drag to move map | 🚀 Then click OPTIMIZE
+    </div>
+    <div class="map-container">
+        <div id="map"></div>
+    </div>
+
+    <script>
+        // ========== DISTANCE MODES ==========
+        let distanceMode = 'euclidean';
+        
+        function distanceEuclidean(a, b) {
+            const dx = (a.lng - b.lng) * 85;
+            const dy = (a.lat - b.lat) * 111;
+            return Math.hypot(dx, dy);
+        }
+        
+        function distanceManhattan(a, b) {
+            const dx = Math.abs((a.lng - b.lng) * 85);
+            const dy = Math.abs((a.lat - b.lat) * 111);
+            return dx + dy;
+        }
+        
+        function distance(a, b) {
+            if (distanceMode === 'euclidean') return distanceEuclidean(a, b);
+            return distanceManhattan(a, b);
+        }
+        
+        // ========== POINT ==========
+        class MapPoint {
+            constructor(lat, lng, id) {
+                this.lat = lat;
+                this.lng = lng;
+                this.id = id;
+            }
+            distTo(other) { return distance(this, other); }
+        }
+        
+        // ========== TSP SOLVER ==========
+        // Точный перебор для n <= 10, жадный для больших
+        function solveTSP(points) {
+            const n = points.length;
+            if (n <= 1) return { route: points.slice(), dist: 0 };
+            if (n === 2) return { route: points.slice(), dist: points[0].distTo(points[1]) * 2 };
+            
+            let bestDist = Infinity;
+            let bestRoute = null;
+            
+            if (n <= 10) {
+                // Точный перебор
+                const indices = Array.from({length: n}, (_, i) => i);
+                const permute = (arr, start) => {
+                    if (start === arr.length - 1) {
+                        let dist = 0;
+                        for (let i = 0; i < arr.length - 1; i++) {
+                            dist += points[arr[i]].distTo(points[arr[i + 1]]);
+                        }
+                        dist += points[arr[arr.length - 1]].distTo(points[arr[0]]);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            bestRoute = [...arr];
+                        }
+                        return;
+                    }
+                    for (let i = start; i < arr.length; i++) {
+                        [arr[start], arr[i]] = [arr[i], arr[start]];
+                        permute(arr, start + 1);
+                        [arr[start], arr[i]] = [arr[i], arr[start]];
+                    }
+                };
+                permute([...indices], 0);
+            } else {
+                // Жадный алгоритм с несколькими стартами
+                const startAttempts = Math.min(20, n);
+                for (let attempt = 0; attempt < startAttempts; attempt++) {
+                    const startIdx = attempt % n;
+                    const visited = new Uint8Array(n);
+                    const route = [startIdx];
+                    visited[startIdx] = 1;
+                    let dist = 0;
+                    let curr = startIdx;
+                    for (let step = 1; step < n; step++) {
+                        let next = -1;
+                        let minD = Infinity;
+                        for (let j = 0; j < n; j++) {
+                            if (!visited[j]) {
+                                const d = points[curr].distTo(points[j]);
+                                if (d < minD) {
+                                    minD = d;
+                                    next = j;
+                                }
+                            }
+                        }
+                        if (next === -1) break;
+                        route.push(next);
+                        dist += minD;
+                        visited[next] = 1;
+                        curr = next;
+                    }
+                    dist += points[curr].distTo(points[route[0]]);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestRoute = route;
+                    }
+                }
+            }
+            
+            return { route: bestRoute.map(i => points[i]), dist: bestDist };
+        }
+        
+        // ========== ВЫЧИСЛЕНИЕ ЭТАЛОННОЙ ТОЧНОСТИ ==========
+        // Используем метод "ближайший сосед" как baseline
+        function computeBaseline(points) {
+            if (points.length <= 1) return 0;
+            const n = points.length;
+            let bestDist = Infinity;
+            // Пробуем разные стартовые точки
+            for (let start = 0; start < Math.min(10, n); start++) {
+                const visited = new Uint8Array(n);
+                const route = [start];
+                visited[start] = 1;
+                let dist = 0;
+                let curr = start;
+                for (let step = 1; step < n; step++) {
+                    let next = -1;
+                    let minD = Infinity;
+                    for (let j = 0; j < n; j++) {
+                        if (!visited[j]) {
+                            const d = points[curr].distTo(points[j]);
+                            if (d < minD) {
+                                minD = d;
+                                next = j;
+                            }
+                        }
+                    }
+                    if (next === -1) break;
+                    route.push(next);
+                    dist += minD;
+                    visited[next] = 1;
+                    curr = next;
+                }
+                dist += points[curr].distTo(points[route[0]]);
+                if (dist < bestDist) bestDist = dist;
+            }
+            return bestDist;
+        }
+        
+        // ========== LEAFLET MAP ==========
+        let map, routeLayer, pointLayer;
+        let points = [];
+        let nextId = 0;
+        
+        function initMap() {
+            map = L.map('map').setView([55.0, 37.0], 6);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; CartoDB',
+                subdomains: 'abcd',
+                maxZoom: 19,
+                minZoom: 3
+            }).addTo(map);
+            
+            routeLayer = L.layerGroup().addTo(map);
+            pointLayer = L.layerGroup().addTo(map);
+            
+            map.on('click', (e) => {
+                addPoint(e.latlng.lat, e.latlng.lng);
+            });
+        }
+        
+        function addPoint(lat, lng) {
+            const newPoint = new MapPoint(lat, lng, nextId++);
+            points.push(newPoint);
+            updatePointsVisual();
+            updateStats();
+            // Очищаем маршрут после добавления новой точки
+            routeLayer.clearLayers();
+            document.getElementById('totalDist').innerHTML = '—';
+            document.getElementById('accuracyVal').innerHTML = '—';
+            document.getElementById('totalTime').innerHTML = '—';
+        }
+        
+        function updatePointsVisual() {
+            pointLayer.clearLayers();
+            points.forEach((p, idx) => {
+                // Маркер-круг
+                const marker = L.circleMarker([p.lat, p.lng], {
+                    radius: 9,
+                    fillColor: '#ff6600',
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.9
+                }).addTo(pointLayer);
+                marker.bindTooltip(`${idx + 1}`, { permanent: false, direction: 'top' });
+                
+                // Номер внутри маркера
+                const label = L.marker([p.lat, p.lng], {
+                    icon: L.divIcon({
+                        html: `<div style="background:#ff6600; color:white; border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:bold;">${idx + 1}</div>`,
+                        iconSize: [22, 22],
+                        className: 'point-label'
+                    })
+                }).addTo(pointLayer);
+            });
+        }
+        
+        function optimizeAndDrawRoute() {
+            if (points.length < 2) {
+                routeLayer.clearLayers();
+                document.getElementById('totalDist').innerHTML = '—';
+                document.getElementById('accuracyVal').innerHTML = '—';
+                return;
+            }
+            
+            const start = performance.now();
+            const result = solveTSP(points);
+            const end = performance.now();
+            
+            // Вычисляем эталон (baseline) и точность
+            const baseline = computeBaseline(points);
+            const accuracy = (baseline / result.dist * 100).toFixed(2);
+            let accuracyClass = '';
+            let accuracyText = '';
+            if (accuracy >= 99) { accuracyClass = 'accuracy-good'; accuracyText = '🔥 PERFECT'; }
+            else if (accuracy >= 95) { accuracyClass = 'accuracy-good'; accuracyText = '✅ EXCELLENT'; }
+            else if (accuracy >= 85) { accuracyClass = 'accuracy-ok'; accuracyText = '📌 GOOD'; }
+            else { accuracyClass = 'accuracy-bad'; accuracyText = '⚠️ MODERATE'; }
+            
+            document.getElementById('totalDist').innerHTML = result.dist.toFixed(2);
+            document.getElementById('accuracyVal').innerHTML = `${accuracy}% ${accuracyText}`;
+            document.getElementById('accuracyVal').className = `value ${accuracyClass}`;
+            document.getElementById('totalTime').innerHTML = (end - start).toFixed(2);
+            
+            // Рисуем маршрут
+            routeLayer.clearLayers();
+            if (result.route.length > 1) {
+                const latlngs = result.route.map(p => [p.lat, p.lng]);
+                const polyline = L.polyline(latlngs, {
+                    color: '#ffaa44',
+                    weight: 5,
+                    opacity: 0.95,
+                    lineJoin: 'round'
+                }).addTo(routeLayer);
+                
+                // Стрелки направления
+                for (let i = 0; i < result.route.length - 1; i++) {
+                    const from = result.route[i];
+                    const to = result.route[i + 1];
+                    const midLat = (from.lat + to.lat) / 2;
+                    const midLng = (from.lng + to.lng) / 2;
+                    const angle = Math.atan2(to.lat - from.lat, to.lng - from.lng) * 180 / Math.PI;
+                    
+                    const arrowIcon = L.divIcon({
+                        html: `<div style="transform: rotate(${angle}deg); font-size: 18px; color: #ffaa44; text-shadow: 0 0 2px black;">➤</div>`,
+                        iconSize: [14, 14],
+                        className: 'arrow-marker'
+                    });
+                    L.marker([midLat, midLng], { icon: arrowIcon }).addTo(routeLayer);
+                }
+            }
+            
+            // Обновляем порядок точек в соответствии с маршрутом
+            updatePointsOrder(result.route);
+        }
+        
+        function updatePointsOrder(orderedPoints) {
+            pointLayer.clearLayers();
+            orderedPoints.forEach((p, idx) => {
+                const marker = L.circleMarker([p.lat, p.lng], {
+                    radius: 9,
+                    fillColor: '#ff6600',
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.9
+                }).addTo(pointLayer);
+                marker.bindTooltip(`${idx + 1}`, { permanent: false, direction: 'top' });
+                
+                const label = L.marker([p.lat, p.lng], {
+                    icon: L.divIcon({
+                        html: `<div style="background:#ff6600; color:white; border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:bold;">${idx + 1}</div>`,
+                        iconSize: [22, 22],
+                        className: 'point-label'
+                    })
+                }).addTo(pointLayer);
+            });
+        }
+        
+        function clearAllPoints() {
+            points = [];
+            nextId = 0;
+            pointLayer.clearLayers();
+            routeLayer.clearLayers();
+            updateStats();
+            document.getElementById('totalDist').innerHTML = '—';
+            document.getElementById('accuracyVal').innerHTML = '—';
+            document.getElementById('totalTime').innerHTML = '—';
+        }
+        
+        function updateStats() {
+            document.getElementById('totalPoints').innerHTML = points.length;
+            document.getElementById('pointCount').innerHTML = `${points.length} points`;
+        }
+        
+        function setMode(mode) {
+            distanceMode = mode;
+            document.getElementById('modeEuclid').classList.remove('active');
+            document.getElementById('modeManhattan').classList.remove('active');
+            if (mode === 'euclidean') document.getElementById('modeEuclid').classList.add('active');
+            else document.getElementById('modeManhattan').classList.add('active');
+            // Если есть точки, пересчитываем маршрут
+            if (points.length > 1) optimizeAndDrawRoute();
+        }
+        
+        // UI
+        document.getElementById('modeEuclid').onclick = () => setMode('euclidean');
+        document.getElementById('modeManhattan').onclick = () => setMode('manhattan');
+        document.getElementById('clearBtn').onclick = clearAllPoints;
+        document.getElementById('runBtn').onclick = () => {
+            if (points.length >= 2) optimizeAndDrawRoute();
+            else alert('Add at least 2 points on the map first!');
+        };
+        
+        // Запуск
+        initMap();
+        updateStats();
+    </script>
+</body>
+</html>

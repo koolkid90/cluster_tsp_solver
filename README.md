@@ -25,6 +25,7 @@ Instead of brute force or complex heuristics, the algorithm assumes that cities 
 💡 Why this matters
 
 Classic TSP – NP-hard, years for 1000 cities
+
 ClusterTSP – P (linear), 1ms for 1000 cities
 
 The catch? This only works when the data has cluster-line structure. But many real-world problems do – and Cluster TSP Solver learns to detect it.

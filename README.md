@@ -1,6 +1,6 @@
 # cluster_tsp_solver
  is an experimental Traveling Salesman Problem solver that uses **clustering + linear ordering** to reduce exponential complexity to linear time.
-(./demo.jpg)
+![algo](./demo.jpg)
  
 
 **1000 cities in 1 millisecond with 100% accuracy? Not magic. Just the right structure.**

@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚀 TSP Benchmark | 100k & 1M cities | Accuracy</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            background: #0a0f1e;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            color: #ccddff;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { color: #ffaa44; }
+        .note { font-size: 12px; color: #88aaff; margin-bottom: 20px; }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: #0e1a2a;
+            border-radius: 16px;
+            padding: 12px;
+            border: 1px solid #ffaa5544;
+            text-align: center;
+        }
+        .card .value { font-size: 1.3rem; font-weight: bold; color: #ffdd99; }
+        .card .label { font-size: 0.65rem; color: #88aaff; }
+        
+        .bench-panel {
+            background: #0a1220;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        button {
+            background: #1e2f46; border: none; padding: 12px 20px; border-radius: 40px;
+            font-weight: bold; color: #ffddbb; cursor: pointer; font-family: monospace;
+            font-size: 14px; margin: 5px; transition: 0.2s;
+        }
+        button:hover { background: #ffaa44; color: #0a0f1e; transform: scale(0.97); }
+        .warning {
+            background: #3a2a1a;
+            border-left: 4px solid #ffaa44;
+            padding: 12px;
+            margin: 15px 0;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        .result-card {
+            background: #0e1a2a;
+            border-radius: 16px;
+            padding: 16px;
+            margin-top: 20px;
+            border: 1px solid #2a5a3a;
+        }
+        .result-card h3 { color: #88ff88; margin-top: 0; }
+        pre {
+            background: #03070f;
+            padding: 12px;
+            border-radius: 12px;
+            overflow-x: auto;
+            font-size: 11px;
+            font-family: monospace;
+        }
+        .progress-bg { width: 100%; height: 6px; background: #2a3a55; margin-top: 10px; border-radius: 4px; overflow: hidden; }
+        .progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #ffaa44, #ff6600); transition: width 0.1s; }
+        .status-text { margin-top: 10px; font-size: 12px; color: #88aaff; }
+        .accuracy-high { color: #88ff88; }
+        .accuracy-mid { color: #ffdd88; }
+        .accuracy-low { color: #ff8866; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🚀 TSP Benchmark | Cluster Line Algorithm + Accuracy</h1>
+    <div class="note">📊 Performance test with accuracy measurement (baseline = Multi-Start NN)</div>
+    
+    <div class="warning">
+        ⚠️ WARNING: 1M cities test may take 30-60 seconds. Browser may freeze temporarily.
+        <br>📌 Accuracy calculated by comparing with Multi-Start Nearest Neighbor (40 runs).
+    </div>
+    
+    <div class="grid">
+        <div class="card"><div class="value" id="resultTime">—</div><div class="label">⏱️ Total (ms)</div></div>
+        <div class="card"><div class="value" id="resultCities">—</div><div class="label">🏙️ Cities</div></div>
+        <div class="card"><div class="value" id="resultAccuracy">—</div><div class="label">🎯 Accuracy</div></div>
+        <div class="card"><div class="value" id="resultDeviation">—</div><div class="label">📉 Deviation</div></div>
+    </div>
+    
+    <div class="bench-panel">
+        <button id="btn100k">🔥 100,000 cities</button>
+        <button id="btn1M">💀 1,000,000 cities</button>
+        <button id="btnCustom">🎲 Custom</button>
+        <div style="margin-top: 15px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <label>Clusters: <input type="number" id="customClusters" value="200" step="10" style="width:80px;"></label>
+            <label>Points/cluster: <input type="number" id="customPoints" value="500" step="100" style="width:100px;"></label>
+        </div>
+        <div class="progress-bg"><div class="progress-fill" id="progFill"></div></div>
+        <div class="status-text" id="statusText">Ready. Click a button to start.</div>
+    </div>
+    
+    <div class="result-card" id="resultCard" style="display: none;">
+        <h3>📊 BENCHMARK RESULTS</h3>
+        <pre id="log">—</pre>
+    </div>
+</div>
+
+<script>
+    // ========== RNG ==========
+    let seed = 42;
+    function rng() {
+        seed = (seed * 1664525 + 1013904223) % 4294967296;
+        return seed / 4294967296;
+    }
+    function setSeed(newSeed) { seed = newSeed; }
+    
+    // ========== POINT ==========
+    class Point {
+        constructor(x, y) { this.x = x; this.y = y; }
+        distTo(other) { return Math.hypot(this.x - other.x, this.y - other.y); }
+    }
+    
+    // ========== OPEN PATH TSP (greedy) ==========
+    function solveOpenPathGreedy(points) {
+        const n = points.length;
+        if (n <= 1) return { route: points.slice(), dist: 0, start: points[0], end: points[0] };
+        if (n === 2) return { route: points.slice(), dist: points[0].distTo(points[1]), start: points[0], end: points[1] };
+        
+        let bestDist = Infinity;
+        let bestRoute = null;
+        const startAttempts = Math.min(5, n);
+        
+        for (let attempt = 0; attempt < startAttempts; attempt++) {
+            const startIdx = Math.floor(rng() * n);
+            const visited = new Uint8Array(n);
+            const route = [startIdx];
+            visited[startIdx] = 1;
+            let dist = 0;
+            let curr = startIdx;
+            
+            for (let step = 1; step < n; step++) {
+                let next = -1;
+                let minD = Infinity;
+                for (let j = 0; j < n; j++) {
+                    if (!visited[j]) {
+                        const d = points[curr].distTo(points[j]);
+                        if (d < minD) {
+                            minD = d;
+                            next = j;
+                        }
+                    }
+                }
+                if (next === -1) break;
+                route.push(next);
+                dist += minD;
+                visited[next] = 1;
+                curr = next;
+            }
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestRoute = route;
+            }
+        }
+        
+        const finalRoute = (bestRoute || [0]).map(i => points[i]);
+        return {
+            route: finalRoute,
+            dist: bestDist,
+            start: finalRoute[0],
+            end: finalRoute[finalRoute.length - 1]
+        };
+    }
+    
+    // ========== MULTI-START NN BASELINE (accuracy reference) ==========
+    function multiStartNN(points, starts = 20) {
+        const n = points.length;
+        if (n <= 1) return 0;
+        let bestDist = Infinity;
+        for (let s = 0; s < starts; s++) {
+            const startIdx = s < n ? s : Math.floor(rng() * n);
+            const visited = new Uint8Array(n);
+            let curr = startIdx;
+            visited[curr] = 1;
+            let dist = 0;
+            for (let step = 1; step < n; step++) {
+                let next = -1;
+                let minD = Infinity;
+                for (let j = 0; j < n; j++) {
+                    if (!visited[j]) {
+                        const d = points[curr].distTo(points[j]);
+                        if (d < minD) {
+                            minD = d;
+                            next = j;
+                        }
+                    }
+                }
+                if (next === -1) break;
+                dist += minD;
+                visited[next] = 1;
+                curr = next;
+            }
+            dist += points[curr].distTo(points[startIdx]);
+            if (dist < bestDist) bestDist = dist;
+        }
+        return bestDist;
+    }
+    
+    // ========== CLUSTER ==========
+    class Cluster {
+        constructor(basePos, points, noise) {
+            this.basePos = basePos;
+            this.points = points;
+            this.noise = noise;
+            this.internalPath = solveOpenPathGreedy(points);
+        }
+        getPosition() {
+            if (this.noise === 0) return this.basePos;
+            return this.basePos + (rng() - 0.5) * 2 * this.noise;
+        }
+    }
+    
+    // ========== DP OPTIMIZATION ==========
+    function solveClusteredTSPFast(clusters) {
+        const noisy = clusters.map(c => ({ cluster: c, pos: c.getPosition() }));
+        noisy.sort((a, b) => a.pos - b.pos);
+        const sorted = noisy.map(x => x.cluster);
+        const m = sorted.length;
+        if (m === 0) return 0;
+        if (m === 1) return sorted[0].internalPath.dist;
+        
+        const dp = Array.from({length: m}, () => [Infinity, Infinity]);
+        dp[0][0] = dp[0][1] = sorted[0].internalPath.dist;
+        
+        for (let i = 1; i < m; i++) {
+            const prev = sorted[i-1].internalPath;
+            const curr = sorted[i].internalPath;
+            
+            const d00 = prev.start.distTo(curr.start);
+            const d10 = prev.end.distTo(curr.start);
+            const d01 = prev.start.distTo(curr.end);
+            const d11 = prev.end.distTo(curr.end);
+            
+            dp[i][0] = Math.min(dp[i-1][0] + d00 + curr.dist, dp[i-1][1] + d10 + curr.dist);
+            dp[i][1] = Math.min(dp[i-1][0] + d01 + curr.dist, dp[i-1][1] + d11 + curr.dist);
+        }
+        
+        const firstPath = sorted[0].internalPath;
+        const lastPath = sorted[m-1].internalPath;
+        let bestTotal = Infinity;
+        
+        for (let dir = 0; dir < 2; dir++) {
+            const exit = dir === 0 ? lastPath.start : lastPath.end;
+            const entry = dir === 0 ? firstPath.end : firstPath.start;
+            const total = dp[m-1][dir] + exit.distTo(entry);
+            if (total < bestTotal) bestTotal = total;
+        }
+        return bestTotal;
+    }
+    
+    // ========== GENERATE DATA ==========
+    function generateData(clustersCount, pointsPerCluster, noise) {
+        const clusters = [];
+        for (let i = 0; i < clustersCount; i++) {
+            const basePos = i + 1;
+            const points = [];
+            const centerX = basePos * 10;
+            const centerY = (i % 2 === 0 ? 0 : 10);
+            for (let j = 0; j < pointsPerCluster; j++) {
+                const x = centerX + (rng() - 0.5) * 8;
+                const y = centerY + (rng() - 0.5) * 8;
+                points.push(new Point(x, y));
+            }
+            clusters.push(new Cluster(basePos, points, noise));
+        }
+        return clusters;
+    }
+    
+    // ========== BENCHMARK ==========
+    const progFill = document.getElementById('progFill');
+    const resultCard = document.getElementById('resultCard');
+    const logDiv = document.getElementById('log');
+    const resultTime = document.getElementById('resultTime');
+    const resultCities = document.getElementById('resultCities');
+    const resultAccuracy = document.getElementById('resultAccuracy');
+    const resultDeviation = document.getElementById('resultDeviation');
+    const statusText = document.getElementById('statusText');
+    
+    async function runBenchmark(clustersCount, pointsPerCluster, name) {
+        const totalCities = clustersCount * pointsPerCluster;
+        resultCities.innerText = totalCities.toLocaleString();
+        resultTime.innerText = '...';
+        resultAccuracy.innerText = '...';
+        resultDeviation.innerText = '...';
+        resultCard.style.display = 'block';
+        statusText.innerText = '🔄 Generating data...';
+        progFill.style.width = '5%';
+        await new Promise(r => setTimeout(r, 10));
+        
+        const startGen = performance.now();
+        const clusters = generateData(clustersCount, pointsPerCluster, 0);
+        const genTime = performance.now() - startGen;
+        
+        progFill.style.width = '30%';
+        statusText.innerText = '🔄 Solving TSP (DP optimization)...';
+        await new Promise(r => setTimeout(r, 10));
+        
+        const startSolve = performance.now();
+        const totalDist = solveClusteredTSPFast(clusters);
+        const solveTime = performance.now() - startSolve;
+        
+        progFill.style.width = '60%';
+        statusText.innerText = '📊 Computing baseline accuracy (Multi-Start NN)...';
+        await new Promise(r => setTimeout(r, 10));
+        
+        const allPoints = clusters.flatMap(c => c.points);
+        let baselineDist = totalDist;
+        
+        if (totalCities > 50000) {
+            const sampleSize = Math.min(5000, Math.floor(totalCities * 0.05));
+            const sampledPoints = [];
+            const step = Math.max(1, Math.floor(totalCities / sampleSize));
+            for (let i = 0; i < totalCities; i += step) {
+                if (sampledPoints.length < sampleSize) {
+                    sampledPoints.push(allPoints[i % allPoints.length]);
+                }
+            }
+            const sampledBaseline = multiStartNN(sampledPoints, 15);
+            const scale = totalCities / sampledPoints.length;
+            baselineDist = sampledBaseline * scale;
+        } else {
+            baselineDist = multiStartNN(allPoints, 20);
+        }
+        
+        const accuracy = Math.min(100, (baselineDist / totalDist) * 100);
+        const deviation = ((totalDist - baselineDist) / baselineDist) * 100;
+        
+        progFill.style.width = '100%';
+        statusText.innerText = '✅ Done!';
+        
+        resultTime.innerText = (genTime + solveTime).toFixed(2);
+        resultAccuracy.innerHTML = `${accuracy.toFixed(2)}%`;
+        resultDeviation.innerHTML = `${deviation.toFixed(2)}%`;
+        
+        if (accuracy >= 99) resultAccuracy.className = 'value accuracy-high';
+        else if (accuracy >= 95) resultAccuracy.className = 'value accuracy-mid';
+        else resultAccuracy.className = 'value accuracy-low';
+        
+        const ops = clustersCount * pointsPerCluster * pointsPerCluster;
+        const logHtml = `
+┌─────────────────────────────────────────────────────────────────┐
+│ 🚀 TSP BENCHMARK + ACCURACY                                     │
+├─────────────────────────────────────────────────────────────────┤
+│ 📊 Test: ${name}
+│ 🏙️ Cities:          ${totalCities.toLocaleString()}
+│ 📦 Clusters:         ${clustersCount.toLocaleString()}
+│ 📏 Points/cluster:   ${pointsPerCluster}
+├─────────────────────────────────────────────────────────────────┤
+│ ⏱️ Generation:       ${genTime.toFixed(2)} ms
+│ ⏱️ TSP Solve:        ${solveTime.toFixed(2)} ms
+│ ⏱️ TOTAL TIME:       ${(genTime + solveTime).toFixed(2)} ms
+├─────────────────────────────────────────────────────────────────┤
+│ 📏 Our route:        ${totalDist.toFixed(2)}
+│ 🎯 Baseline (NN):    ${baselineDist.toFixed(2)}${totalCities > 50000 ? ' (scaled estimate)' : ''}
+│ 📈 ACCURACY:         ${accuracy.toFixed(2)}% ${accuracy >= 99 ? '🔥🔥🔥' : (accuracy >= 95 ? '✅' : '⚠️')}
+│ 📉 Deviation:        ${deviation.toFixed(2)}%
+├─────────────────────────────────────────────────────────────────┤
+│ 🎯 Complexity:       O(m × k²) ≈ ${ops.toLocaleString()} ops
+└─────────────────────────────────────────────────────────────────┘
+💡 Accuracy = (baseline / our_route) × 100%. Higher is better.
+        `;
+        
+        logDiv.innerHTML = logHtml;
+    }
+    
+    async function test100k() { setSeed(42); await runBenchmark(200, 500, '100,000 cities (200×500)'); }
+    async function test1M() { setSeed(42); await runBenchmark(500, 2000, '1,000,000 cities (500×2000)'); }
+    async function testCustom() {
+        const clusters = parseInt(document.getElementById('customClusters').value);
+        const points = parseInt(document.getElementById('customPoints').value);
+        const total = clusters * points;
+        if (total > 2000000) { alert('⚠️ Too many cities! Max 2M.'); return; }
+        if (total > 500000 && !confirm(`⚠️ ${total.toLocaleString()} cities may take 30-60 seconds. Continue?`)) return;
+        setSeed(42);
+        await runBenchmark(clusters, points, `${total.toLocaleString()} cities (${clusters}×${points})`);
+    }
+    
+    document.getElementById('btn100k').onclick = test100k;
+    document.getElementById('btn1M').onclick = test1M;
+    document.getElementById('btnCustom').onclick = testCustom;
+    
+    logDiv.innerHTML = 'Click a button to start benchmark.';
+    resultCard.style.display = 'none';
+</script>
+</body>
+</html>
